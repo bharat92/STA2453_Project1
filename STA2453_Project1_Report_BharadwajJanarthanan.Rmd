@@ -1,0 +1,1283 @@
+---
+title: "Movie Sucess Analysis: An Exploratory Study"
+author: "Bharadwaj Janarthanan | 1005068720 | bharadwaj@cs.toronto.edu"
+date: "12 November 2018"
+output: 
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
+---
+
+<style>
+body {
+text-align: justify;
+font-family: "Times New Roman"
+}
+</style>
+
+```{r setup, include=FALSE,warning=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = FALSE,message = FALSE,warning = FALSE)
+library(boxoffice)
+library(tidyverse)
+library(data.table)
+library(jsonlite)
+library(knitr)
+library(kableExtra)
+library(rvest)
+library(httr)
+library(sentimentr)
+library(magrittr)
+library(glmnet)
+library(tm)
+library(RColorBrewer)
+library(wordcloud)
+library(tidytext)
+library(fpp)
+```
+
+This document is a report of all the exploratory analysis conducted to understand and identify the key drivers of box-office success of a movie. A total of 1403 movies released during the period 2010-2017 was used for this analysis. All conclusions made are based on observations made on this subset of data.  
+
+## Problem Description
+
+This project report is focussed towards addressing the following research questions,
+
+1. How well do NYTimes movie critic pick movies that are box office hits?
+2. Is there a relationship between NYTimes movie review sentinment and critics pick?
+3. What characteristics of a movie affects it's revenue?  
+
+##Contents
+
+The rest of this report is structured in sections as listed below,
+
+* **Section 1: Introduction**  
+
+* **Section 2: Data Collection Methods** 
+    + 2.1. NYTimes Movies Data
+    + 2.2. Box-Office Movies Collection
+    + 2.3. Merging NYTimes Review and BoxOffice Data
+    + 2.4. OMDB Movies Data Pull and Merge
+    
+* **Section 3: Data Flow Diagram** 
+
+* **Section 4: Data Wrangling** 
+    + 4.1. Modelling Data Preparation  
+     
+* **Section 5: Experiments and Findings**  
+    * **5.1. Question 1: How well do NYTimes movie critic pick movies that are box office hits?**
+         + 5.1.1. How many movies are picked by NYTimes critic?
+         + 5.1.2. Compare cumulative average box office revenue in first 100 days:Critic's Pick vs Not Critic's Pick
+         + 5.1.3. A box-plot showing box-office revenue distribution by Critic's choice
+         + 5.1.4. Slope of the graph - Gross Box-Office Revenue vs Running Days
+         + 5.1.5. Statistical analysis to confirm visual observations
+         + 5.1.6. Inference  
+    * **5.2. Question 2: Is there a relationship between NYTimes movie review sentiment and critics pick?**
+         + 5.2.1. Identify sentiment of review article
+         + 5.2.2. Verify for a relationship between article's sentiment and critic's pick
+         + 5.2.3. A statistical analysis, to confirm observations
+         + 5.2.4. Inference  
+    * **5.3. Question 3: What characteristics of a movie affects it's revenue?**
+         + 5.3.1. Bivariate analysis of different movie attributes with box-office revenue
+             + 5.3.1.1. The Genre(s) of the movie
+             + 5.3.1.2. Language of the movie
+             + 5.3.1.3. MPAA rating
+             + 5.3.1.4. Movie Cast
+             + 5.3.1.5. Time of Release
+             + 5.3.1.6. Average number of theatres showing the movie
+             + 5.3.1.7. Ratings on IMDb, Rotten Tomatoes and Metacritic
+            
+         + 5.3.2. A quantitative approach to identifying influential attributes of box-office revenue
+             + 5.3.2.1. Variable Selection
+             + 5.3.2.2. Multiple  Regression Model
+             + 5.3.2.3. Inference  
+  
+* **Section 6: Conclusion and Discussion**  
+
+* **Section 7: References** 
+
+
+##Section 1: Introduction
+
+The film industry is a key contributor to economy with the global box-office collection totalling to US $ 40.6 billion as of 2017 per the report _[9]_. Movie production houses need to take decisions on which movie to produce, with the objective to maximise profit and minimise spends. These decisions are usually based upon qualitative measures such as how interesting the plot is, what genre the movie should be under, the movie director, proposed cast, estimated budget and production time for the movie. It therefore becomes critical for production houses to identify key influencers for a movie's commercial success. In this report, we provide a quantitative approach to identify influential factors for a movie's commercial success along with their impact.   
+  
+  A candidate set of movie attributes were considered for this study. It includes,  genre of the movie, movie review sentiment, cast of the movie, time of release, rating on review portals such as IMDb, Rotten Tomatoes, MetaScore, the MPAA (Motion Pictures Association of America) rating, number of languages the movie has been dubbed in,number of theatres showing the movie and how long the movie has been showing in theatres.   
+  
+  For the purpose of this study, three major data sources were used, OMDB Movies Database, NYTimes Movie Review and Box-Office-Numbers Database. The rest of this  report is split into two major  sections, the first section describes different data sources used, collection methods, aggregation and merging rules, developed to prepare tidy analytical data.The second section lists out focussed questions and graphs to examine key variable relationships and develop appropriate statistical analyses to quantify the effect of each movie attribute on its box-office success.
+
+##Section 2: Data Collection Methods
+
+For the purpose of this study,we collected data from three different sources,   
+
+1. NYTimes Movie Review Database
+2. OMDB Movies Database
+3. Box-Office
+
+Additionally, we scraped NYTimes movie reviews and the details of how we extract data is provided below.
+
+###2.1. NYTimes Movies Data
+
+**2.1.a. NYTimes Movie Review Data**:
+
+NYTimes movie reviews were collected using NYTimes Movie Reviews API in a JSON format which was then processed using R and  written into a table format. NYTimes API limit number of queries to a 1000 and not more than 20 results in a query, iterative query calls were made through API to extract data on a weekly basis. For our study, we used movies from last 10 years i.e., 2010-17. This dataset is used to understand NYTimes critic's choice, movie review sentiment analysis and finally examine how it impacts box-office revenue.
+
+```{r, eval=FALSE, echo=FALSE}
+nyt_review_dat<-data.frame()
+year_range<-as.character(seq(as.Date("2010-01-01"),
+                as.Date("2018-01-04"),"6 day"))
+for(year in year_range){
+print(year)
+Sys.sleep(2)
+url <- "http://api.nytimes.com/svc/movies/v2/reviews/search.json?"  
+#year_start<-(paste(year,"12","20",sep="-"))
+#year_end<-(paste(year,"12","31",sep="-"))
+#qdate <- paste("opening-date=",year_start,";",year_end,"&",sep="")   
+qdate <- paste("opening-date=",as.Date(year),";",(as.Date(year)+5),"&",sep="")   
+key <- "api-key="  
+apikey_times<-"cb6cf922b1064721872213059a9a0036"  
+url2 <- paste0(url,qdate,key,apikey_times) 
+ntydat_iter <- fromJSON(url2)$results
+if(length(ntydat_iter)>0){
+ntydat_iter <- flatten(ntydat_iter)
+ntydat_iter[,grepl("multimedia",names(ntydat_iter))]<-NULL
+nyt_review_dat<-rbind(nyt_review_dat,ntydat_iter)
+}
+}
+nyt_review_dat<-unique(nyt_review_dat)
+save(nyt_review_dat,file="./NYT_Moview_Review_Data.RData")
+
+```
+
+**2.1.b. Extracting review text for each movie**:
+
+The review articles were scraped from URL link provided on  NYTimes dataset in an iterative fashion. The data extracted was cleaned for metadata and advertisements. Pattern matching is used to remove paragraphs beginning with expressions such as "Written By","Directed By", "Running time","Advertisement","Please verify". This data was used to perform sentiment analysis to find the overall sentiment of NYTimes movie review.
+
+```{r, eval=FALSE, echo=FALSE}
+for(url in nyt_review_dat$link.url){
+  Sys.sleep(3)
+  movie_title<-nyt_review_dat$display_title[nyt_review_dat$link.url==url]
+  movie_opening_date<-nyt_review_dat$opening_date[nyt_review_dat$link.url==url]
+  article_by<-nyt_review_dat$byline[nyt_review_dat$link.url==url]
+  print(movie_title)
+  webpage <- read_html(url)
+  article_data_html <- html_nodes(webpage,'article p')
+  article_data_text<-html_text(article_data_html)
+  review_article<-cbind(movie_title,article_data_text,article_by,movie_opening_date)
+  colnames(review_article)<-c("display_title","article_para","article_by","opening_date")
+  nyt_review_articles<-rbind(nyt_review_articles,review_article)
+}
+
+nyt_review_articles<-nyt_review_articles[!nyt_review_articles$article_para %in% c("Advertisement","",
+                                                                                  "You must select a newsletter to subscribe to.",
+                                                                                  "Please verify you're not a robot by clicking the box.",
+                                                                                  "View all New York Times newsletters.",
+                                                                                  "Invalid email address. Please re-enter.",
+                                                                                  "Movie data powered by IMDb.com"
+                                                                                  ),]
+nyt_review_articles$display_title<-as.character(nyt_review_articles$display_title)
+nyt_review_articles$article_para<-as.character(nyt_review_articles$article_para)
+nyt_review_articles<-nyt_review_articles[str_to_lower(nyt_review_articles$display_title)!=str_to_lower(nyt_review_articles$article_para),]
+nyt_review_articles<-nyt_review_articles[!str_detect(nyt_review_articles$article_para,"(^By )|(Running time:)|(^Directed by)|(^Written and directed by)|(^Rating )|(^A version of this review )|(^Genre\\s+ )"),]
+nyt_review_articles$article_para<-trimws(nyt_review_articles$article_para)
+nyt_review_articles$article_para<-str_replace_all(nyt_review_articles$article_para,"[\r\n]|\\s+"," ")
+nyt_review_articles<-nyt_review_articles[nchar(nyt_review_articles$article_para)>60,]
+
+save(nyt_review_articles,file="NYT_Review_Article_Content.RData")
+```
+
+###2.2. Box-Office Movies Collection
+
+boxoffice() is a package in R to get information about daily box office results of movies. It scrapes the webpages of either http://www.boxofficemojo.com or https://www.the-numbers.com/ for this information.It contains daily level and total box-office revenue made by movies since it's release and also records the number of theatres that play the movie on a given date. This data source was used for extracting box-office revenue collection for movies.
+
+```{r, eval=FALSE,echo=FALSE}
+year_range<-2010:2017
+boxoffice_dat<-data.frame()
+for(year in year_range){
+  print(year)
+  year_start<-as.Date(paste(year,"01","01",sep="-"))
+  year_end<-as.Date(paste(year,"12","31",sep="-"))
+  bodat <- boxoffice(dates = seq(year_start, year_end, "day"), site = "numbers")
+  bodat_c <- boxoffice(dates = seq(as.Date(paste(year,"01","01",sep="-")), 
+                                   as.Date(paste(year,"07","31",sep="-")), "day"), site = "numbers")
+  save(bodat,file=paste("./BODat_",year_start,"_",year_end,".RData",sep=""))
+  boxoffice_dat<-rbind(boxoffice_dat,bodat)
+}
+
+boxoffice_dat$movie<-ifelse(boxoffice_dat$movie=="Kit Kittredge: An American .",
+                            "Kit Kittredge: An American Girl",
+                            ifelse(boxoffice_dat$movie=="Big Mommas: Like Father, Li.",
+                                   "Big Mommas: Like Father, Like Son",
+                                   ifelse(boxoffice_dat$movie=="The Oogieloves in the BIG B.",
+                                          "The Oogieloves in the Big Balloon Adventure",
+                                          boxoffice_dat$movie)))
+save(boxoffice_dat,file="./BO_Full_Dat.RData")
+```
+
+###2.3. Merging NYTimes Review and Box-Office Data
+NYTimes Review and BoxOffice data were merged into a single flat file, based on their movie title and opening date. This was done prior to OMDB pull to ensure, OMDB data pull is only initiated for movies that are matched between NYTimes review and Box-Office dataset
+
+Mapping Rules:  
+
+Do note that, to map betweem NYTimes review and Box-Office, the movie titles were preprocessed as follows,  
+
+1. For movies with same title, join them based on recency of article review to box-office revenue data  
+[the same movie title might have been used on a different opening date and the box-office revenue needs to be matched appropriately]  
+
+2. For movies that have partially different title names in the two sources, match them based on a similarity measure such as Leveinstein's distance  
+
+It was observed that post pre-processing, 48% of movies in NYTimes review are found to have daily-boxoffice information. This is about 1546 movies.
+
+As OMDB limits the number of queries to 1000 without subscription, it would suffice to use these 1546 movies to pull out relevant movie attributes from OMDB. A call per movie was made to OMDB, over two days.  
+
+```{r, eval=FALSE, echo=FALSE}
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/BO_Full_Dat.RData?raw=true"))
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/NYT_Moview_Review_Data.RData?raw=true"))
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/NYT_Review_Article_Content.RData?raw=true"))
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/OMDB_Movie_Data.RData?raw=true"))
+
+bo_filterfornyt_dat<-boxoffice_dat[boxoffice_dat$date<="2017-12-31" ,]
+rm(boxoffice_dat)
+bo_filterfornyt_dat$movie<-gsub("(.)+","",bo_filterfornyt_dat$movie)
+review_movies<-unique(nyt_review_dat$display_title)
+bo_filterfornyt_dat$best_guess_title<-sapply(bo_filterfornyt_dat$movie,function(x) review_movies[pmatch(x,review_movies)])
+
+#Identify movies in NYT without a box office map
+moviews_wo_bo<-nyt_review_dat$display_title[!nyt_review_dat$display_title %in% unique(bo_filterfornyt_dat$movie)]
+
+#Replace movie titles in Box office with the best guess title
+bo_filterfornyt_dat$movie<-ifelse(bo_filterfornyt_dat$best_guess_title %in% moviews_wo_bo,bo_filterfornyt_dat$best_guess_title,
+                                  bo_filterfornyt_dat$movie)
+
+#After replacement with best guess-number of missing movies
+moviews_wo_bo<-nyt_review_dat$display_title[!nyt_review_dat$display_title %in% unique(bo_filterfornyt_dat$movie)]
+
+bo_filterfornyt_dat<-data.table(bo_filterfornyt_dat)
+bo_filterfornyt_replacetitle_dat<-unique(data.frame(bo_filterfornyt_dat[days==1,.(movie,date)]))
+best_guess_title2<-c()
+for(x in 1:nrow(bo_filterfornyt_replacetitle_dat)){
+  print(x)
+  matching_titles<-nyt_review_dat$display_title[agrep(bo_filterfornyt_replacetitle_dat$movie[x],
+                                                      nyt_review_dat$display_title, max = 0.2)]
+  nyt_review_match_dat<-nyt_review_dat[nyt_review_dat$display_title %in% matching_titles,c("display_title","opening_date")]
+  bo_date<-bo_filterfornyt_replacetitle_dat$date[x]
+  nyt_review_match_dat$closest_date<-bo_date-as.Date(nyt_review_match_dat$opening_date)
+  nyt_review_match_dat<-nyt_review_match_dat[nyt_review_match_dat$closest_date>=0,]
+  nyt_review_match_dat<-nyt_review_match_dat[order(nyt_review_match_dat$closest_date),]
+  best_guess_title2<-c(best_guess_title2,nyt_review_match_dat$display_title[1])
+}
+bo_filterfornyt_replacetitle_dat$best_guess_title2<-best_guess_title2
+
+#Replace movies without a title with the second best guess
+bo_filterfornyt_dat<-merge(bo_filterfornyt_dat,bo_filterfornyt_replacetitle_dat,by=c("movie","date"),all.x=TRUE)
+bo_filterfornyt_dat<-data.table(bo_filterfornyt_dat)
+bo_filterfornyt_dat[,best_guess_title2:=na.locf(best_guess_title2),by=list(movie)]
+rm(best_guess_title2)
+
+#Replace movie titles in Box office with the best guess title
+bo_filterfornyt_dat$movie<-ifelse(bo_filterfornyt_dat$best_guess_title2 %in% moviews_wo_bo,bo_filterfornyt_dat$best_guess_title2,
+                                  bo_filterfornyt_dat$movie)
+
+
+#After replacement with best guess-number of missing movies
+moviews_wo_bo<-nyt_review_dat$display_title[!nyt_review_dat$display_title %in% unique(bo_filterfornyt_dat$movie)]
+#52% of movies are stil unmapped
+
+bo_filterfornyt_dat<-
+  bo_filterfornyt_dat%>%
+  group_by(movie)%>%
+  summarise(max_days=max(days))%>%
+  inner_join(bo_filterfornyt_dat,by="movie")%>%
+  inner_join(nyt_review_dat,by=c("movie"="display_title"))
+
+bo_filterfornyt_dat<-bo_filterfornyt_dat%>%
+  mutate(diff_days=as.Date(date)-as.Date(publication_date))
+
+bo_filterfornyt_dat<-bo_filterfornyt_dat%>%
+  group_by(movie,date)%>%
+  summarise(day_min=min(diff_days))%>%
+  inner_join(bo_filterfornyt_dat,by=c("movie"="movie","date"="date"))
+
+bo_filterfornyt_dat<-bo_filterfornyt_dat%>%
+  filter(day_min==diff_days)
+
+bo_filterfornyt_dat<-bo_filterfornyt_dat[,c("movie","date",
+                                            "distributor","gross",
+                                            "percent_change","theaters",
+                                            "per_theater","total_gross",
+                                            "days","mpaa_rating",
+                                            "critics_pick","byline",
+                                            "headline","summary_short","publication_date","opening_date")]
+
+save(bo_filterfornyt_dat,file="./BO_NYT_Merged_Dat.RData")
+
+```
+
+###2.4. OMDB Movies Data Pull and Merge
+
+The OMDb API is a RESTful web service to obtain movie information such as genre,cast, MPAA rating,metacritic score,IMDb rating and other characteristics, the data was extracted in JSON format and then parsed into a table format using R  
+
+Eextracted OMDB file was merged with the merged NYTimes Review and Box-Office data on key movie title and release date, to return one single flat analytical tidy dataset. A total of 1,403 movies released between 2010-17 were  matched and used to perform all explorations and statistical experiments.
+
+```{r, echo=FALSE,eval=FALSE}
+apikey_omdb<-"2c76ea62"
+omdb_movies_dat<-data.frame()
+for(title in unique(bo_filterfornyt_dat$movie)){
+  print(title)
+omdb_q <- GET("http://www.omdbapi.com/", 
+              query = list(t = title, apikey = apikey_omdb))
+omdb_tmp_dat <- content(omdb_q)
+if(as.character(omdb_tmp_dat$Response)=="True"){
+  ratings_dat<-unlist(omdb_tmp_dat$Ratings)
+  rotten_ratings_dat<-ratings_dat[match("Rotten Tomatoes",ratings_dat)+1]
+  omdb_tmp_dat$Ratings<-NULL
+  omdb_tmp_dat<-as.data.frame(omdb_tmp_dat)
+  omdb_tmp_dat$rotten_rating<-ifelse(is.null(rotten_ratings_dat),NA,rotten_ratings_dat)
+  append_col_to_omdb_tmp_dat<-colnames(omdb_movies_dat)[!colnames(omdb_movies_dat) %in% colnames(omdb_tmp_dat)]
+  if(length(append_col_to_omdb_tmp_dat)>0){
+    cols_to_add<-rep(list(NA),length(append_col_to_omdb_tmp_dat))
+    names(cols_to_add)<-append_col_to_omdb_tmp_dat
+    omdb_tmp_dat<-cbind(omdb_tmp_dat,cols_to_add)
+  }
+  if(nrow(omdb_movies_dat)>0){
+  append_col_to_omdb_movies_dat<-colnames(omdb_tmp_dat)[!colnames(omdb_tmp_dat) %in% colnames(omdb_movies_dat)]
+    if(length(append_col_to_omdb_movies_dat)>0){
+    cols_to_add<-rep(list(NA),length(append_col_to_omdb_movies_dat))
+    names(cols_to_add)<-append_col_to_omdb_movies_dat
+    omdb_movies_dat<-cbind(omdb_movies_dat,cols_to_add)
+  }
+  omdb_tmp_dat<-omdb_tmp_dat[,colnames(omdb_movies_dat)]
+  }
+  omdb_movies_dat<-rbind(omdb_movies_dat,omdb_tmp_dat)
+}
+}
+
+save(omdb_movies_dat,file="./OMDB_Movie_Data.RData")
+
+omdb_movies_dat<-omdb_movies_dat%>%
+  mutate_all(as.character)
+
+bo_filterfornyt_dat<-bo_filterfornyt_dat%>%
+  inner_join(omdb_movies_dat,by=c("movie"="Title"))
+
+#Do not consider re-released movies in theatre
+bo_filterfornyt_dat<-bo_filterfornyt_dat[bo_filterfornyt_dat$opening_date>="2010-01-01",]
+
+save(bo_filterfornyt_dat,file="./BO_NYT_OMDB_Merged_Dat.RData")
+```
+
+##Section 3: Data Flow Diagram
+
+The below architecture diagram provides a simple view of how the four different data sources collected were merged to prepare analytical dataset that is used in this research study.  
+
+
+```{r, echo=FALSE}
+url <- "https://github.com/bharat92/STA2453_Project1/blob/master/Data_Merge_Image.png?raw=true"
+```
+![](`r url`)
+
+##Section 4: Data Wrangling
+
+A number of aggregations and analysis were performed on the merged flat analytical dataset to find answers to questions listed out at the beginning of this report.This sub-section provides a detailed description of all aggregations and transformations performed to prepare analytical datasets for developing solutions to the questions listed at the beginning of this report.  
+
+An estimate of the rate of change of box-office revenue over running days was computed and added to the analytical dataset. This feature was used to compare the rate of box-office revenue change per day, across movies that critic's pick and those that they don't. 
+
+The sentiment score for each movie review was found using sentimentr package in R (detailed in later sections) and attached to the analytical dataset.This score was used to understand how review sentiment influences critic's choice.
+
+Aggregate statistics such as, average box-office revenue, total box-office revenue, standard deviation and total number of movies were computed by rolling the analytical dataset on Genre, Language, Cast, MPAA rating, Review Sentiment, Release Quarter. These datasets were used to visualise how box-office revenue is influenced by different attributes of a movie.
+
+The following section describes the features and transformations carried out before building a multiple regression model to understand influence of movie attributes on box-office success.
+
+_Note: The merged dataset is at a level, Movie Title X Opening Date X Day since release, however for most analysis the latest observations for a movie was used._
+
+
+```{r,eval=FALSE,echo=FALSE}
+#----Calculating Slope= (Revenue/Days) for each movie----
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/BO_NYT_OMDB_Merged_Dat.RData?raw=true"))
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/NYT_Review_Article_Content.RData?raw=true"))
+bo_slope_dat<-data.frame()
+for(movie in unique(bo_filterfornyt_dat$movie)){
+  tmp_dat<-bo_filterfornyt_dat[bo_filterfornyt_dat$movie==movie,]
+  slope<-coef(lm(log(total_gross)~days,data=tmp_dat))[2]
+  slope_data<-cbind(movie,
+        max(tmp_dat$total_gross),
+        max(tmp_dat$days),
+        slope,
+        unique(tmp_dat$critics_pick))
+  
+  colnames(slope_data)<-c("Movie","Total_Gross","Total_Days","Slope","critics_pick")
+  
+  bo_slope_dat<-rbind(bo_slope_dat,slope_data)
+}
+
+bo_slope_dat$Slope<-as.numeric(as.character(bo_slope_dat$Slope))
+bo_slope_dat$Total_Days<-as.numeric(as.character(bo_slope_dat$Total_Days))
+bo_slope_dat$Total_Gross<-as.numeric(as.character(bo_slope_dat$Total_Gross))
+
+save(bo_slope_dat,file="./BO_Slope_DaysVsRevenue.RData")
+
+#-----NYT Review Articles Sentiment Score-------
+nyt_review_articles<-nyt_review_articles[nyt_review_articles$display_title %in% unique(bo_filterfornyt_dat$movie),]
+nyt_review_articles_sentiment_score_dat<-nyt_review_articles%>%
+  group_by(display_title,article_by,opening_date)%>%
+  mutate(para_number=row_number())%>%
+  get_sentences() %$%
+  sentiment_by(article_para,list(display_title,article_by,opening_date,para_number),averaging.function=average_mean)
+
+nyt_review_articles_sentiment_score_dat<-nyt_review_articles_sentiment_score_dat%>%
+  group_by(display_title,article_by,opening_date)%>%
+  summarise(max_para=max(para_number),min_para=min(para_number))%>%
+  inner_join(nyt_review_articles_sentiment_score_dat,by=c("display_title","article_by","opening_date"))
+
+nyt_review_articles_sentiment_score_dat<-nyt_review_articles_sentiment_score_dat%>%
+  mutate(wt_word_cnt=ifelse(para_number==max_para | para_number==min_para,2*word_count,word_count))
+
+nyt_summarized_review_score_dat<-nyt_review_articles_sentiment_score_dat%>%
+  group_by(display_title,article_by,opening_date)%>%
+  summarise(average_sentiment_score=weighted.mean(ave_sentiment,wt_word_cnt))
+
+nyt_summarized_review_score_dat<-nyt_summarized_review_score_dat%>%
+  inner_join(unique(bo_filterfornyt_dat[,c("movie","byline","critics_pick")]),by=c("display_title"="movie","article_by"="byline"))
+
+nyt_summarized_review_score_dat$sentiment_flag<-ifelse(nyt_summarized_review_score_dat$average_sentiment_score>0.05,"Positive",ifelse(nyt_summarized_review_score_dat$average_sentiment_score<(-0.05),"Negative","Neutral"))
+
+save(nyt_summarized_review_score_dat,file="./NYT_Review_SentimentScore.RData")
+
+
+#----Genres Summary Data------
+#List of Genres
+genres<-unique(trimws(unlist(str_split(unique(bo_filterfornyt_dat$Genre),","))))
+bo_summary_genres_dat<-data.frame()
+for(genre in genres){
+  tmp_dat<-unique(bo_filterfornyt_dat[bo_filterfornyt_dat$Genre %like% genre,c("movie","byline","days","total_gross")])
+  tmp_dat<-tmp_dat%>%
+    group_by(movie,byline)%>%
+    summarise(max_days=max(days))%>%
+    inner_join(tmp_dat,by=c("movie","byline"))%>%
+    filter(max_days==days)
+  bo_summary_genres_dat_tmp<-cbind(genre,length(unique(tmp_dat$movie)),sum(tmp_dat$total_gross,na.rm=TRUE))
+  colnames(bo_summary_genres_dat_tmp)<-c("genre","no_of_movies","total_gross")
+  bo_summary_genres_dat<-rbind(bo_summary_genres_dat,bo_summary_genres_dat_tmp)
+}
+bo_summary_genres_dat$genre<-as.character(bo_summary_genres_dat$genre)
+bo_summary_genres_dat$no_of_movies<-as.numeric(as.character(bo_summary_genres_dat$no_of_movies))
+bo_summary_genres_dat$total_gross<-as.numeric(as.character(bo_summary_genres_dat$total_gross))
+
+save(bo_summary_genres_dat,file="./Genes_Summary.RData")
+
+#----Languages Summary Data----
+bo_filterfornyt_dat$no_lang_off<-sapply(bo_filterfornyt_dat$Language,function(x) length(trimws(unlist(unique(str_split(x,","))))))
+lang_bo_dat<-bo_filterfornyt_dat%>%
+  group_by(movie,byline)%>%
+    summarise(max_days=max(days))%>%
+    inner_join(bo_filterfornyt_dat,by=c("movie","byline"))%>%
+    filter(max_days==days)%>%
+  group_by(no_lang_off)%>%
+  summarise(no_of_movies=n(),total_gross=sum(total_gross),avg_Gross=mean(total_gross,na.rm=TRUE))
+
+save(lang_bo_dat,file="./Languages_Summary.RData")
+
+#----MPAA Rating-----
+summary_bo_rating_dat<-bo_filterfornyt_dat%>%
+  group_by(movie,byline)%>%
+    summarise(max_days=max(days))%>%
+    inner_join(bo_filterfornyt_dat,by=c("movie","byline"))%>%
+    filter(max_days==days)%>%
+  group_by(mpaa_rating)%>%
+  summarise(avg_gross=mean(total_gross,na.rm=TRUE),
+            total_gross=sum(total_gross,na.rm = TRUE),
+            no_of_movies=n())
+
+save(summary_bo_rating_dat,file="./MPAA_Ratings_Summary.RData")
+
+#-----Actors Summary Data--------
+actors_list<-unique(trimws(unlist(str_split(unique(bo_filterfornyt_dat$Actors),","))))
+bo_summary_actors_dat<-data.frame()
+for(actor in actors_list){
+  tmp_dat<-unique(bo_filterfornyt_dat[bo_filterfornyt_dat$Actors %like% actor,c("movie","byline","days","total_gross")])
+  tmp_dat<-tmp_dat%>%
+    group_by(movie,byline)%>%
+    summarise(max_days=max(days))%>%
+    inner_join(tmp_dat,by=c("movie","byline"))%>%
+    filter(max_days==days)
+  bo_summary_actors_dat_tmp<-cbind(actor,length(unique(tmp_dat$movie)),sum(tmp_dat$total_gross,na.rm=TRUE),mean(tmp_dat$total_gross,na.rm=TRUE))
+  colnames(bo_summary_actors_dat_tmp)<-c("actor","no_of_movies","total_gross","avg_gross")
+  bo_summary_actors_dat<-rbind(bo_summary_actors_dat,bo_summary_actors_dat_tmp)
+}
+bo_summary_actors_dat$actor<-as.character(bo_summary_actors_dat$actor)
+bo_summary_actors_dat$no_of_movies<-as.numeric(as.character(bo_summary_actors_dat$no_of_movies))
+bo_summary_actors_dat$total_gross<-as.numeric(as.character(bo_summary_actors_dat$total_gross))
+bo_summary_actors_dat$avg_gross<-as.numeric(as.character(bo_summary_actors_dat$avg_gross))
+
+save(bo_summary_actors_dat,file="./Actors_Summary.RData")
+
+#----Release Time Summary Data--------
+bo_filterfornyt_dat$opening_date<-as.Date(bo_filterfornyt_dat$opening_date)
+bo_filterfornyt_dat$release_week<-paste(substr(bo_filterfornyt_dat$opening_date,1,4),
+                                        ifelse(week(bo_filterfornyt_dat$opening_date)<10,                                               paste0("0",week(bo_filterfornyt_dat$opening_date)),
+                                               week(bo_filterfornyt_dat$opening_date)),sep="-")
+
+bo_filterfornyt_dat$release_month<-paste(substr(bo_filterfornyt_dat$opening_date,1,4),
+                                        ifelse(month(bo_filterfornyt_dat$opening_date)<10,                                               paste0("0",month(bo_filterfornyt_dat$opening_date)),
+                                               month(bo_filterfornyt_dat$opening_date)),sep="-")
+
+bo_filterfornyt_dat$release_qtr<-paste(substr(bo_filterfornyt_dat$opening_date,1,4),"-0"                 ,quarter(bo_filterfornyt_dat$opening_date),sep="")
+
+releasetime_summary_dat<-bo_filterfornyt_dat%>%
+  group_by(movie,opening_date)%>%
+  summarise(max_days=max(days,na.rm=TRUE))%>%
+  inner_join(bo_filterfornyt_dat,by=c("movie","opening_date"))%>%
+  filter(max_days==days)%>%
+  group_by(release_qtr)%>%
+  summarise(no_of_movies=n(),
+            tot_gross=sum(total_gross,na.rm=TRUE),
+            avg_monthly_gross=mean(total_gross,na.rm=TRUE))
+
+save(releasetime_summary_dat,file="./Release_Time_Summary.RData")
+
+#---Theatre Summary Data-----
+theatre_summary_dat<-bo_filterfornyt_dat%>%
+  group_by(movie,opening_date)%>%
+  summarise(no_of_theatres_perday=mean(theaters,na.rm=TRUE),
+            max_days=max(days,na.rm=TRUE))%>%
+  inner_join(bo_filterfornyt_dat,by=c("movie","opening_date"))%>%
+  filter(max_days==days)
+
+save(theatre_summary_dat,file="./Theatre_Summary.RData")
+
+#---Agent Ratings Data-----
+rating_summary_dat<-bo_filterfornyt_dat%>%
+  group_by(movie,opening_date)%>%
+  summarise(max_days=max(days,na.rm=TRUE))%>%
+  inner_join(bo_filterfornyt_dat,by=c("movie","opening_date"))%>%
+  filter(max_days==days)%>%
+  select(movie,opening_date,rotten_rating,imdbRating,Metascore,total_gross)
+
+rating_summary_dat$rotten_rating<-as.numeric(gsub("%","",rating_summary_dat$rotten_rating))
+rating_summary_dat$imdbRating<-(as.numeric(rating_summary_dat$imdbRating)/10)*100
+rating_summary_dat$Metascore<-as.numeric(rating_summary_dat$Metascore)
+
+rating_summary_dat<-melt(rating_summary_dat,id=c("movie","opening_date","total_gross"))
+colnames(rating_summary_dat)<-c("movie","opening_date","total_gross","rating_agent","rating")
+rating_summary_dat$rating_agent<-ifelse(rating_summary_dat$rating_agent=="rotten_rating","Rotten Tomatoes",
+                                        ifelse(rating_summary_dat$rating_agent=="imdbRating","IMDB","MetaScore"))
+
+save(rating_summary_dat,file="./Agent_Ratings.RData")
+
+
+```
+
+**4.1. Modelling Data Preparation:**
+
+A multiple regression model is explained on a later secion in this report. The proposed approach aims to identify the key factors influencing box-office revenue of a movie and measure the extent of influence. All the variables and transformations neeeded before modelling is explained in this section and the equation(s) are elaborated at a later section in this report.  
+
+1. _Response Variable_:  
+    Log transformed total box-office revenue in US dollars. The variable is log-transformed to remove influence of scales while modelling.
+
+2. _Predictor/ Influencer Variables_:  
+
+    + Genre of the Movie:    
+      A one-hot encoding of the genre tags for each movie was prepared.The same movie can fall under multiple Genre(s) and all the Genre(s) were considered.
+      
+    + Language(s) the Movie was released in:  
+      This feature was encoded as the number of languages in which the movie has been dubbed in.
+      
+    + Cast of the Movie:  
+      This feature was encoded as the number of actors on cast who have been cast on more than 5 movies over 10 years and their movies have had a box-office collection that's above the median box-office collection in market.
+      
+    + Seasonality:  
+      This feature was encoded as the Quarter in which the movie was released
+      
+    + MPAA Rating:  
+      A one-hot encoding of the different MPAA ratings for a movie
+      
+    + Review Polarity:
+      An average sentiment score computed for the movie review on NYTimes.
+
+```{r,eval=FALSE,echo=FALSE}
+#Preparing data for modelling
+model_data<-bo_filterfornyt_dat%>%
+  group_by(movie,byline)%>%
+  summarise(max_days=max(days,na.rm=TRUE),
+            avg_no_theatres=mean(theaters,na.rm=TRUE))%>%
+  inner_join(bo_filterfornyt_dat,by=c("movie","byline"))%>%
+  filter(days==max_days & !is.na(Released) & Released!="N/A")
+
+model_data<-model_data%>%
+  select(movie,byline,max_days,distributor,total_gross,Released,
+         mpaa_rating,critics_pick,Year,Runtime,Genre,Director,
+         Writer,Actors,Language,Country,Awards,avg_no_theatres,
+         Metascore,imdbRating,imdbVotes,BoxOffice,Production,Website,rotten_rating)%>%
+  inner_join(nyt_summarized_review_score_dat[,c("display_title","article_by","average_sentiment_score","sentiment_flag")],by=c("movie"="display_title",
+                                                                                                                               "byline"="article_by"))
+
+genre_data<-model_data%>%
+  select(movie,byline,Genre)%>%
+  mutate(Genre = strsplit(Genre, ",")) %>%
+  unnest(Genre)%>%
+  mutate(Genre=trimws(Genre))
+  #mutate(Genre=ifelse(Genre %in% c("Drama","Action","Comedy","Adventure","Thriller","Romance","Crime"),Genre,"Others"))
+
+genre_data<-unique(genre_data)%>%
+  mutate(flag_col=1,Genre=paste0("Genre: ",Genre))%>%
+  spread(Genre,flag_col)
+
+genre_data[is.na(genre_data)]<-0
+
+model_data<-model_data%>%
+  inner_join(genre_data,by=c("movie","byline"))
+
+language_data<-model_data%>%
+  select(movie,byline,Language)%>%
+  mutate(Language = strsplit(Language, ",")) %>%
+  unnest(Language)%>%
+  group_by(movie,byline)%>%
+  summarise(lang_cnt=n())
+
+model_data<-model_data%>%
+  mutate(Language=NULL)%>%
+  inner_join(language_data,by=c("movie","byline"))
+
+actors_data<-model_data%>%
+  select(movie,byline,Actors,total_gross)%>%
+  mutate(Actors = strsplit(Actors, ",")) %>%
+  unnest(Actors)%>%
+  mutate(Actors=trimws(Actors))%>%
+  group_by(Actors)%>%
+  summarise(median_bo=median(total_gross,na.rm=TRUE),
+            number_movies=n())%>%
+  filter(number_movies>1)
+  
+actors_data$median_full_bo<-median(model_data$total_gross,na.rm=TRUE)
+actors_data$star_cast<-ifelse((actors_data$median_full_bo)<actors_data$median_bo & actors_data$number_movies>5,1,0)
+
+  
+model_data<-model_data%>%
+  mutate(no_star_cast=sum(actors_data$star_cast[actors_data$Actors %in% trimws(unlist(strsplit(Actors,",")))],na.rm=TRUE))%>%
+  mutate(qtr_release=quarters(as.Date(Released,format="%d %B %Y")))
+
+save(model_data,file="./Modelling_Data.RData")
+```
+
+##Section 5: Experiments and Findings
+
+This section describes explorations and statistical experiments performed to develop solutions to the research questions. The findings from these analyses together helped develop a quantitative approach to identify key influencers of a movie's box-office revenue. This section focuses on each research question and explains sub-questions for which explorations and experiments were performed to address the research question in focus and reports the finidngs and conclusions from statistical experiments.  
+
+###5.1. Question 1: How well do NYTimes critic's pick movies that are box office hits?
+
+In this research question,  the relationship between movie reviews and box-office revenue examined. For this research, NYTimes movie reviews were used. The following sub-sections describes experiments performed to address the research question in focus.
+
+####5.1.1. How many movies are picked by NYT critic's?
+
+Understanding how many movies of the total movies in the analytical dataset of 1403 movies was a NYTime critic's choice is essential to examine, to make any conclusions on their relationship with box-office revenue. The table below suggest that about 28.53% of the total movies in the analytical dataset are picked by NYTimes critics. For this research purposes the observed split of 70-30 is considered reasonable enough to make any valid conclusions on the relationship between movie review and box-office success.
+
+```{r,echo=FALSE}
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/BO_NYT_OMDB_Merged_Dat.RData?raw=true"))
+critics_freq_tbl<-aggregate(movie~as.character(critics_pick),data=bo_filterfornyt_dat,function(x) length(unique(x)))
+colnames(critics_freq_tbl)<-c("Critics Pick","# of Movies")
+kable(critics_freq_tbl)%>%
+  kable_styling(bootstrap_options = c("hover")) %>%
+  column_spec(1, bold = T)
+```
+
+####5.1.2. Compare cumulative average box-office revenue in first 100 days:Critic's Pick vs Not Critic's Pick:
+
+A plot of the average cumulative vs box-office revenue in million US Dollars, over first 100 days,for movies that are critic's pick vs those that are not, suggest that they are fairly similar in revenue distribution. Critic's choice doesn't seem to be influenced by box-office revenue. The below graph, illustrates the same.
+
+```{r,echo=FALSE}
+agg_bo_filterfornyt_dat<-aggregate(total_gross~critics_pick+days,
+                                   data=bo_filterfornyt_dat,function(x) mean(x,na.rm = TRUE))
+agg_bo_filterfornyt_dat<-agg_bo_filterfornyt_dat[agg_bo_filterfornyt_dat$days<100,]
+agg_bo_filterfornyt_dat$critics_pick<-as.character(agg_bo_filterfornyt_dat$critics_pick)
+
+ggplot(data=agg_bo_filterfornyt_dat)+
+  aes(x = days,y=total_gross/1000000,colour=critics_pick)+
+  geom_line()+
+  scale_x_continuous(breaks=seq(1,100,7))+
+  labs(x="Days since release", y="Cumulative Average of Box-Office Revenue, in million US Dollars", 
+       col="Critics Pick (0=No, 1=Yes)")+
+  ggtitle("Cumulative Distribution of Box-Office Revenue")
+```
+
+####5.1.3. A box-plot showing box-office revenue distribution by Critic's choice:
+
+Here, the distribution of total box-office revenue across movies that are critic's choice is examined against those that aren't and it is observed that, critic's choice of movies have lower box-office revenue than those that aren't.
+
+```{r,echo=FALSE}
+#Box plot box office dollars against critics pick
+
+bo_filterfornyt_totalgross_dat<-
+  bo_filterfornyt_dat%>%
+  group_by(movie,Director)%>%
+  summarise(max_days=max(days))%>%
+  inner_join(bo_filterfornyt_dat,by=c("movie","Director"))%>%
+  filter(days==max_days)
+
+ggplot(data=bo_filterfornyt_totalgross_dat)+
+  aes(x=as.character(critics_pick),y=(total_gross/1000000),fill=as.character(critics_pick))+
+  geom_boxplot()+
+  ggtitle("Box-Office Revenue distribution, in million US Dollars")+
+  labs(x="Critics Pick (0=No, 1=Yes)", y="Box-Office Revenue, in million US Dollars", 
+       fill="Critics Pick (0=No, 1=Yes)")
+
+```
+
+####5.1.4. Slope of the graph - Box-Office Revenue vs Running Days:
+
+A simple linear model shwoing the rate of change of box-office revenue, since day of release illustrates box-office performance of movies that are critic's choice.Comparing the distribution of slopes of this equation across movies, that are Critic's pick and those that aren't, they both have a similar, left skewed distribution. This affirms all observations from previous graphs that NYT critic's don't seem to be influenced by box-office revenue.
+
+_Note:The equation of the simple linear model used in this analysis is as follows,_  
+_***log(Box-Office Revenue, US Dollars)=a+b*(# of days since release)**_  
+_where a=constant, b=slope_
+
+```{r,echo=FALSE}
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/BO_Slope_DaysVsRevenue.RData?raw=true"))
+ggplot(data=bo_slope_dat[bo_slope_dat$Total_Days<365,])+
+  aes(x=Slope,fill=critics_pick)+
+  geom_histogram(binwidth =0.1)+
+  facet_wrap(~critics_pick)+
+  labs(x="Slope=(Box-Office Revenue, US Dollars/Days)",
+       y="Number of movies")+
+  ggtitle("Distribution of box-office revenue per day")
+```
+
+
+####5.1.5. Statistical analysis to confirm visual observations:
+
+To statistically validate the observations made from the above explorations, a Student's t test was performed to compare the means of box office revenue across movies that are picked by critic's and those that aren't. Additionally a simple logistic regression was performed, with Critic's choice as the response variable and box-office revenue as the only independent variable. As can be seen from the results below, both analysis suggest that box-office revenue is not an influencer of critic's choice (as can be seen from their insignificant p-values because of which we fail to reject the null-hypothesis that the Average revenue is same, in t-test)
+
+```{r}
+print("----Logistic Regression----------")
+print(summary(glm(critics_pick~Total_Gross,data = bo_slope_dat,family="binomial")))
+print("----T Test----------")
+print(t.test(Total_Gross ~ critics_pick, data = bo_slope_dat))
+```
+
+####5.1.6. Inference:
+
+From all the explorations and analysis conducted in 5.1.1 to 5.1.5 it is evident that NYT critic's are not influenced by box-office revenue when they make recommendations to their readers A movie that performs well in box-office doesn't have to be a NYT critic's choice. Likewise, box-office revenue is not influenced by NYT Critic's pick.
+
+###5.2. Question 2: Is there a relationship between NYTimes movie review sentiment and critics pick?
+
+In this section, we focus on the research question, to identify relationship betwee NYTimes movie review sentiment and NYTimes critic's pick.The following sub-sections describe explorations and experiments conducted to develop answers for the same.
+
+####5.2.1. Identify sentiment of review article:
+
+The movie review articles scraped from NYTimes website was analyzed for their sentiment. The sentiment of each sentence in the article was analyzed by assigning a polarity score in the range [-1,1], with -1 being most negative and 1 being most positive and then averaged out for each paragraph. The first and last paragraph scores were upweighted and the weight updated scores of paragraphs were averaged to identify polarity of review. We use the sentimentr package in R to find sentiment score for each sentence. The details of the equation and dictionary are provided at _[5]_,  we recommend reviewing the package documentation for a thorough understanding of the approach.
+
+A bottleneck with this approach is that, some movie reviews are more a description of the movie plot than a critique. As a result, a movie that probably has a good rating and a fairly good review might be assigned a negative polarity and vice versa.To counter this, the polarity scores of first and last paragraph were upweighted, it was observed that these paragraphs were more about review of movie than plot, unlike other paragraphs. However, if the article is minimal on critiquing, our approach doesn't perform well in picking a review sentiment.
+
+The histogram below shows the distribution of the calculated NYT review polarity score across movies that are critic's pick and those that aren't. There definitely is a strong correlation between the critic's choice and NYT article's sentiment.
+
+```{r}
+
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/NYT_Review_SentimentScore.RData?raw=true"))
+
+ggplot(data=nyt_summarized_review_score_dat[nyt_summarized_review_score_dat$critics_pick==1,])+
+  aes(x=average_sentiment_score,fill=critics_pick)+
+  geom_histogram(binwidth = 0.01)+
+  theme(legend.position = "none")+
+  ggtitle("Distribution of NYTimes Review Sentiment Score for Critic's Pick")+
+  labs(x="Average Sentiment Score for NYTimes Review",y="Number of movies")
+```
+
+####5.2.2. Verify for a relationship between article's sentiment and critic's pick:
+
+The sentiment scores were grouped together into positive, neutral and negative scores to examine if NYTimes criti's choice is guided by the sentiment of movie review. The grouping rules are as follows,
+
+A review is positive, when it's score is > 0.05  
+A review is negative, when it's score is < -0.05  
+A review is neutral, when it's score is between -0.05 and 0.05  
+
+The below word-cloud representation,shows top 200 most frequent words in reviews that are classified positive, negative and neutral based on the above mentioned heuristic. It can be observed that postive reviews have more positive sentiment words than negative, while negative reviews have more negative sentiment words than positive, while neutral has mixed sentiment words. Presence of words such as success, intelligence, charming, modern, modest, satisy, bright, delightful, worth in movie review makes it positive in polarity, while words such as waste, disappointing, worst, chaos, messy, lacks, preposterous, stupid in movie review, make it negative in polarity. In positive reviews a few positive sentiment words are used much more frequently than others while in negative reviews the reviewers vary in their choice of negative sentiment words and have many negative words that occur less frequently across review articles.  
+```{r,echo=FALSE,eval=FALSE}
+
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/NYT_Review_Article_Content.RData?raw=true"))
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/NYT_Review_SentimentScore.RData?raw=true"))
+
+nyt_review_articles$article_para<-gsub("[^[:alnum:][:blank:]?&/\\-]","",nyt_review_articles$article_para)
+sentiments<-unique(nyt_summarized_review_score_dat$sentiment_flag)
+
+for(sentiment_i in sentiments){
+docs <- Corpus(VectorSource(paste(nyt_review_articles$article_para[nyt_review_articles$display_title %in% unique(nyt_summarized_review_score_dat$display_title[nyt_summarized_review_score_dat$sentiment_flag==sentiment_i])],collapse="."))) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(removeNumbers) %>%
+  tm_map(tolower)  %>%
+  tm_map(removeWords, stopwords("english")) %>%
+  tm_map(stripWhitespace)
+
+tdm <- DocumentTermMatrix(docs,control = list(wordLengths = c(5, Inf)))%>%
+  as.matrix()
+tdm<-t(tdm)
+
+set.seed(123) 
+tdm<-tdm[!str_detect(str_to_lower(str_trim(rownames(tdm))),"((movie)|(story)|(direct[a-z]*)|(act)|(write)|(author)|(character)|(feedback)|(some)|(scene)|(special)|(enough)|(rather)|(times)|(another)|(whose)|(includ)|(seem)|(though)|(do)|(rate)|(script)|(play)|(there)|(every)|(might)|(screen)|(give)|(go)|(want)|(take)|(make))|(action)|(humor)|(drama)|(comedy)|(thriller)|(adventure)|(funny)"),]
+
+sentiment_words<-get_sentiments("bing")
+
+tdm<-cbind(names(tdm),tdm)
+rownames(tdm)<-NULL
+colnames(tdm)<-c("word","n")
+tdm<-data.frame(tdm)
+tdm$word<-as.character(tdm$word)
+tdm$n<-as.numeric(as.character(tdm$n))
+
+tdm<-tdm%>%
+  inner_join(sentiment_words)%>%
+  group_by(word,sentiment)%>%
+  summarise(n=sum(n,na.rm=TRUE))
+
+tdm$color<-ifelse(tdm$sentiment=="negative","dark red",ifelse(tdm$sentiment=="positive","dark green","darkgoldenrod1"))
+
+save(tdm,file=paste0("./TDM_",sentiment_i,".RData"))
+}
+```
+```{r, echo=FALSE}
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/TDM_Neutral.RData?raw=true"))
+neutral<-tdm
+
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/TDM_Positive.RData?raw=true"))
+positive<-tdm
+
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/TDM_Negative.RData?raw=true"))
+negative<-tdm
+
+rm(tdm)
+
+par(mar=rep(0,4))
+layout(matrix(c(1,2,3,4,5,6), nrow=2,ncol=3), heights=c(0.2,3))
+
+plot.new()
+wordcloud(positive$word, positive$n,max.words=200,colors=as.character(positive$color),ordered.colors = TRUE)
+text(x=0.5, y=-0.2,paste("Movie Review: Positive"),col="dodgerblue4",font=20)
+
+
+plot.new()
+wordcloud(neutral$word, neutral$n,max.words=200,colors=as.character(neutral$color),ordered.colors = TRUE) 
+text(x=0.5, y=-0.2,paste("Movie Review: Neutral"),col="dodgerblue4",font=20)
+
+plot.new()
+wordcloud(negative$word, negative$n,max.words=200,colors=as.character(negative$color),ordered.colors = TRUE) 
+text(x=0.5, y=-0.2,paste("Movie Review: Negative"),col="dodgerblue4",font=20)
+```
+
+Comparing proportions of movie review with different sentiments across movies that are NYT critic's choice and those that are not, it can be seen that indeed Critic's choice is influenced by the NYTimes movie review sentiment, with a very few negative review sentiment movies picked by NYT critic's. However, critic's seem to pick a good number of movies with neutral and positive movie reviews.  
+
+```{r}
+sentiment_cont_tbl<-aggregate(display_title~critics_pick+sentiment_flag,data=nyt_summarized_review_score_dat,function(x) length(unique(x)))
+
+colnames(sentiment_cont_tbl)<-c("Critics Pick","Sentiment","Number of Movies")
+
+kable(spread(sentiment_cont_tbl[order(sentiment_cont_tbl$`Critics Pick`),],`Critics Pick`,`Number of Movies`),row.names = FALSE)%>%
+  kable_styling(bootstrap_options = c("hover")) %>%
+  column_spec(1, bold = T)
+
+sentiment_cont_tbl$`Critics Pick`<-as.character(sentiment_cont_tbl$`Critics Pick`)
+
+ggplot(data=sentiment_cont_tbl)+
+  aes(x=Sentiment,y=`Number of Movies`,fill=`Critics Pick`)+
+  geom_col()+
+  ggtitle("Movie Review Sentiment vs Critic's Choice")
+```
+
+
+####5.2.3. A statistical analysis, to confirm observations:
+
+To statistically validate the observations made from above visualisations, a chi-square test of indenpendence was conducted to check for correlation between movie review sentiment and critic's choice.Additionally, a simple logistic regression with the response variable as critic's choice and movie review sentiment as the only independent variable was built to understand the extent of influence. The equation for the regression model is as follows, 
+
+***Critic's Choice=a+b*(review_sentiment)**  
+
+_where review_sentiment is a categorical variable that is one-hot encoded_
+
+The results of analysis suggest that, indeed critic's choice for a movie is influenced by the NYT review sentiment, as can be observed from a significant p-value for chi-square test at 5% level of significance that allows to reject the null-hypothesis. A logisitic regression analysis, illustrate the extent of influence movie review sentiment have on the Critic's choice for the movie.
+
+```{r}
+sentiment_cont_tbl<-spread(sentiment_cont_tbl,key="Critics Pick",value = "Number of Movies")
+rownames(sentiment_cont_tbl)<-sentiment_cont_tbl[,1]
+sentiment_cont_tbl<-data.matrix(sentiment_cont_tbl[,-1])
+print("-----Chi-Square Test of Independence-------")
+print(chisq.test(sentiment_cont_tbl))
+print("-----Logistic Regression with Critic's Pick as Response and Review Sentiment as IV---")
+print(summary(glm(critics_pick~sentiment_flag,data=nyt_summarized_review_score_dat,family="binomial")))
+sentiment_cont_tbl[,1]<-round(sentiment_cont_tbl[,1]*100/sum(sentiment_cont_tbl[,1]),0)
+sentiment_cont_tbl[,2]<-round(sentiment_cont_tbl[,2]*100/sum(sentiment_cont_tbl[,2]),0)
+sentiment_cont_tbl<-data.frame(sentiment_cont_tbl)
+colnames(sentiment_cont_tbl)<-c("0","1")
+sentiment_cont_tbl[,1]<-paste(sentiment_cont_tbl[,1],"%")
+sentiment_cont_tbl[,2]<-paste(sentiment_cont_tbl[,2],"%")
+kable(sentiment_cont_tbl,caption="Movie Review Sentiment Vs Critic's Choice- % of movies")%>%
+  kable_styling(bootstrap_options = c("hover")) %>%
+  column_spec(1, bold = T)
+```
+
+####5.2.4. Inference:
+ 
+From the explorations and statistical analysis conducted in 5.2.1 to 5.2.3, it is observed that indeed critic's choice is strongly influenced by sentiment of review on NYTimes. NYT Critic's tend to not pick movies with negative reviews on NYT.
+
+###5.3. Question 3: What characteristics of a movie affects it's revenue?
+
+####5.3.1. Bivariate analysis of different movie attributes and box-office revenue:  
+
+**5.3.1.1. The Genre(s) of the movie**:   
+
+Adventure, Action, Comedy, Drama are genres with more than 10 billion revenue while Sci-Fi, Animation, Thriller, Fantasy, Family, Crime are movies with about 5 billion box office revenue.A large number of movies released are Drama, followed by Comedy and Action. While only a few (less than 200), Sci-Fi, Fantasy, Family, Animation and Horror movies have been released in 8 years, they seem to be top performers in box office revenue. The visuals, suggest that only a few genre of the total 23 genres of movies make the most box office revenue between 2010-2017.
+
+_Do note the same movie can be classified under multiple Genre(s) and we count them in each of those Genre(s) in our analysis_
+
+```{r}
+
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/Genes_Summary.RData?raw=true"))
+
+ggplot(data=bo_summary_genres_dat[!is.na(bo_summary_genres_dat$genre) & bo_summary_genres_dat$genre!="N/A",])+
+  aes(x=reorder(genre,no_of_movies),y=no_of_movies)+
+  geom_col(fill="dodgerblue4")+
+  coord_flip()+
+  theme(legend.position = "none")+
+  labs(y="Number of movies",x="Genre")+
+  ggtitle("Number of movies by Genre between 2010-2017")+
+  scale_fill_brewer()
+
+ggplot(data=bo_summary_genres_dat[!is.na(bo_summary_genres_dat$genre) & bo_summary_genres_dat$genre!="N/A",])+
+  aes(x=reorder(genre,log(total_gross)),y=total_gross/(10**9))+
+  geom_col(fill="dodgerblue4")+
+  coord_flip()+
+  theme(legend.position = "none")+
+ labs(y="Box-Office Revenue, in billions",x="Genre")+
+  ggtitle("Box-Office Revenue, in billions by Genre between 2010-2017")+
+  scale_fill_brewer()
+
+```
+
+**5.3.1.2. Language of the movie**:  
+
+Most movies were released in just one language (English), while a few were released in two languages, and fewer than 10 movies released in more than 5 languages and from inspections on the raw data, these are mostly popular movies across international audience. A feature that indicates the number of languages in which the movie was dubbed in was fed into the model selection procedure to see if the number of languages in which the movie was dubbed in has an influence on it's box-office revenue.
+
+Some examples of movies offered in more than 5 languages are,
+```{r echo=FALSE}
+multilingual_movies_list<-c("An Inconvenient Sequel: Truth to Power", 
+"Call Me by Your Name",
+"Dead Man Down",  
+"Elysium",
+"Geostorm", 
+"Johnny English Reborn",
+"Limitless", 
+"Rush",
+"Sherlock Holmes: A Game of Shadows",  
+"Sarah's Key",  
+"Hanna",
+"Fast & Furious 6",  
+"Life of Pi",  
+"Double Dhamaal",
+"Captain America: Civil War", 
+"Lucy",  
+"Downsizing",  
+"Blade Runner 2049",  
+"American Assassin")
+
+kable(matrix(multilingual_movies_list,5),
+      caption="Multilingual Movies (more than 5 languages release)")%>%
+  kable_styling(bootstrap_options = c("hover")) %>%
+  column_spec(c(1,2,3,4))
+
+```
+```{r}
+
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/Languages_Summary.RData?raw=true"))
+
+ggplot(data=lang_bo_dat)+
+  aes(x=as.character(no_lang_off),y=no_of_movies,fill=as.character(no_lang_off))+
+  geom_col(fill="dodgerblue4")+
+  theme(legend.position = "none")+
+  labs(x="Number of Languages released in",y="Number of movies")+
+  ggtitle("Number of movies released in multiple languages")
+
+ggplot(data=lang_bo_dat)+
+  aes(x=as.character(no_lang_off),y=total_gross/(10**9),fill=as.character(no_lang_off))+
+  geom_col(fill="dodgerblue4")+
+  theme(legend.position = "none")+
+  labs(x="Number of Languages released in",y="Box-Office revenue, in billions")+
+  ggtitle("Total Box-Office revenue of movies released in multipled languages")
+
+ggplot(data=lang_bo_dat)+
+  aes(x=as.character(no_lang_off),y=avg_Gross/(10**9),fill=as.character(no_lang_off))+
+  geom_col(fill="dodgerblue4")+
+  theme(legend.position = "none")+
+  labs(x="Number of Languages released in",y="Box-Office revenue, in billions")+
+  ggtitle("Average Box-Office revenue of movies released in multipled languages")
+```
+
+**5.3.1.3. MPAA rating**:  
+
+The rating given to a movie by MPAA influences the box-office revenue for the movie. A R rated movie has fewer viewership than a G rated movie. 
+
+From the analysis below it is seen that, while more movies were produced in the decreasing order of R,PG-13,PG,G, on an average movies perform better at box-office in the decreasing order of, PG,G,PG-13,R. Therefore, a one-hot encoding feature indicating the MPAA rating for a movie was fed infor model selection.
+
+```{r}
+
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/MPAA_Ratings_Summary.RData?raw=true"))
+
+ggplot(data=summary_bo_rating_dat[!summary_bo_rating_dat$mpaa_rating %in% c("Not Rated",""),])+
+  aes(x=mpaa_rating,y=no_of_movies,fill=mpaa_rating)+
+  geom_col(fill="dodgerblue4")+
+  theme(legend.position = "none")+
+  labs(x="MPAA Rating",y="Number of Movies")+
+  ggtitle("Number of Movies Distribution of MPAA ratings 2010-17")+
+  scale_color_brewer(palette="Accent")
+
+ggplot(data=summary_bo_rating_dat[!summary_bo_rating_dat$mpaa_rating %in% c("Not Rated",""),])+
+  aes(x=mpaa_rating,y=avg_gross/(10**6),fill=mpaa_rating)+
+  geom_col(fill="dodgerblue4")+
+  theme(legend.position = "none")+
+  labs(x="MPAA Rating",y="Box-Office revenue")+
+  ggtitle("Box-Office Revenue Distribution of MPAA ratings 2010-17")+
+  scale_fill_brewer(palette="Spectral")
+
+```
+
+**5.1.3.4. Movie Cast**:  
+
+A study of the movie cast shows that star cast movies have higher box office revenue than the movies without a star cast, derived from the definition. From a visual inspection of actors identified as star cast, it is indeed evident that these are popular actors (see table below).A feature indicating number of star actors in a movie cast wass used as a feature in model selection procedure.
+
+To do this study, a definition of star cast was proposed as follows,  
+_An actor is said to be star cast if he/she has acted in more than 5 movies during 2010-17 and the median of their movies box-office revenue is more than the median revenue at box-office._
+
+```{r}
+
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/Actors_Summary.RData?raw=true"))
+
+#Defining star cast
+#We define a heuristic here, the actor should have been cast in at least 5 movies in 10 years and their movies make abovemedian income
+bo_summary_actors_dat<-bo_summary_actors_dat[bo_summary_actors_dat$no_of_movies>=5,]
+bo_summary_actors_dat$above_median_flg<-ifelse(bo_summary_actors_dat$avg_gross>quantile(bo_summary_actors_dat$avg_gross,0.5),1,0)
+
+#Does star cast movie have different box office revenue as compared to non-star cast?
+start_cast_summary<-bo_summary_actors_dat%>%
+  group_by(above_median_flg)%>%
+  summarise(no_of_actors=n(),mean_gross=mean(total_gross,na.rm=TRUE))
+ggplot(data=start_cast_summary)+
+  aes(x=as.character(above_median_flg),y=mean_gross/(10**6))+
+  geom_col(fill="dodgerblue4")+
+  theme(legend.position = "none")+
+  labs(x="Star Cast(0=No 1=Yes)",y="Average box-office revenue, in millions")+
+  ggtitle("Box-Office Revenue by Star Cast")
+
+```
+
+_A list of star cast identified from the above definition are as follows,_  
+
+```{r}
+bo_dat<-matrix(bo_summary_actors_dat$actor[bo_summary_actors_dat$above_median_flg==1],9)
+bo_dat %>%
+  kable(format = "html") %>%
+  kable_styling(bootstrap_options = c("hover")) %>%
+  kableExtra::scroll_box(width = "100%", height = "400px")
+```
+
+
+**5.3.1.5. Time of release**:   
+
+Box-office revenue for a movie is also dependent on temporal factors such as quarter in which the movie was released. Movies released in quarters with more holidays have a higher box office revenue than the ones that are not.  
+
+A time series decomposition of the average box-office revenue across quarters in a year shows that movies released in second and fourth quarter of a year perform better than the movie released on first and third quarter, with second quarter grossing more revenue than fourth. 
+
+Quarterly seasonality flags was fed into the model selection proecdure to determine the inlfuence of seasonality on a movie's commercial success.    
+
+```{r}
+#bo_filterfornyt_dat<-bo_filterfornyt_dat%>%
+#  inner_join(nyt_review_dat[,c("display_title","byline","opening_date")],by=c("movie"="display_title","byline"="byline"))
+
+
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/Release_Time_Summary.RData?raw=true"))
+
+
+avg_monthly_gross_in_millions<-ts(releasetime_summary_dat$avg_monthly_gross/(10**6),frequency = 4,start=c(2010,01),end=c(2017,04))
+#plot(avg_monthly_gross_in_millions)
+#plot(decompose(avg_monthly_gross_in_millions))
+autoplot(avg_monthly_gross_in_millions)+
+  labs(y="Average Quarterly box-office revenue")+
+  ggtitle("Time Series Plot of Avg. Box-Office Revenue by Quarter")
+```
+
+**5.3.1.6. Average number of theatres the movie has been through the weeks**:  
+
+The study showed that more the number of theatres in which movie is released, the higher the box-office revenue. The same was statistically validated using a test of correlation, showing a strong positive correlation value of 0.55 and a signifcant p-value at 5% level of significance  
+
+```{r}
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/Theatre_Summary.RData?raw=true"))
+
+ggplot(data=theatre_summary_dat)+
+  aes(x=no_of_theatres_perday,y=total_gross/(10**6))+
+  geom_point(colour="dodgerblue4")+
+  ggtitle("Box-Office Revenue vs Number of Theatres")+
+  labs(x="Average Number of theatres running the movie, in a day",
+       y="Box-Office Revenue, in millions")
+
+cor.test(theatre_summary_dat$no_of_theatres_perday,theatre_summary_dat$total_gross)
+```
+
+
+**5.3.1.7. Rating on IMDb,Rotten Tomatoes and Metacritic**:  
+
+This study illustrates impact of different agent ratings on a movie's box-office revenue. From the graphs, it is evident that IMDb rating seem to be less influential on box-ofice revenue, while Rotten Tomatoes ratings plot clearly show that movies with low ratings have low box-office collections.
+
+```{r}
+
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/Agent_Ratings.RData?raw=true"))
+
+ggplot(data=rating_summary_dat)+
+  aes(x=rating,y=total_gross/(10**6),colour=rating_agent)+
+  geom_point()+
+  facet_wrap(~rating_agent)+
+  theme(legend.position="none")+
+  labs(x="% Rating by Agent",y="Box Office Revenue, in millions")+
+  ggtitle("Movie Rating vs Box-Office Revenue")
+```
+
+####5.3.2. A multivariate quantitative approach to identifying influential attributes of box-office revenue:
+
+This section describes a statistical approach to identify influential attributes of a movie and the extent of influence on a movie's box-office revenue. 
+
+The modelling approach is carried out in two phases,  
+1. Variable Selection  
+2. Multiple Regression Model  
+
+The data for model is prepared as described in section, 4.1 above. Do note that, section 4.1 was developed based on findings from sections 5.1.1-5.3.1.
+
+**5.3.2.1. Variable Selection**:  
+A LASSO selection technique was used to perform variable selection. A LASSO model allows coefficients of features to be zero, providing a reduced feature set, with improved prediction accuracy while maintaining interpretability of models. The lasso model uses L1 regularization technique with it's loss function described as follows,   
+
+$$ L = \sum_{i=1}^{n}(y_{i}-\boldsymbol{x}_{i}^{T}\beta)^{2} + \lambda\sum_{j=1}^{d}|\beta_{j}|$$
+$$\begin{align}
+&\text{where, }\lambda\text{ is the regularization parameter}\\
+&y_{i}\text{ in this study would be log-transformed box-office revenue}\\
+&x_{i}^{T}\text{ is the feature vector corresponding to }i^{th}\text{ movie in dataset}\\
+&\beta_{j}\text{ is the coefficient estimate for }j^{th}\text{ feature/ attribute of the movie}\end{align}$$
+       
+For further reading on the technique, it is recommended to review _[6]_ on references.  
+
+**5.3.2.2. Multiple Regression Model**:  
+
+A multiple linear regression model was developed with the response variable as log-transformed box-office revenue and all the variables from the LASSO selection model that had a non-zero coefficient. The final equation of model and the actual vs fit curve are provided below, 
+
+$$\begin{aligned}
+&log(\text{box-office revenue})=\alpha+\beta_{\text{genre}}*\text{Genre}+\\
+&\beta_{\text{Number of Star cast}}*\text{Number of Star cast}+\beta_{\text{Number of languages dubbed in}}*\text{Number of languages dubbed in}+\\
+&\beta_{\text{Running Days}}*\text{Running Days}+\beta_{\text{Number of Running Theatres}}*\text{Number of Running Theatres}+\beta_{\text{Release Quarter}}*\text{Release Quarter}+\\
+&\beta_{\text{Movie Review Sentiment Score}}*\text{Movie Review Sentiment Score}+\beta_{\text{MPAA Rating}}*\text{MPAA Rating}+\beta_{\text{Rotten Tomatoes Rating}}*\text{Rotten Tomatoes Rating}
+\end{aligned}$$
+
+
+```{r}
+load(url("https://github.com/bharat92/STA2453_Project1/blob/master/Modelling_Data.RData?raw=true"))
+model_data<-model_data%>%
+  select(-c(distributor,Released,Year,Runtime,Director,Writer,Actors,Country,Awards,imdbVotes,BoxOffice,Production,Website))
+
+model_data<-model_data%>%
+  mutate(rotten_rating=as.numeric(gsub("%","",rotten_rating)),
+         imdbRating=(as.numeric(imdbRating)/10)*100,
+        Metascore=as.numeric(Metascore),
+        mpaa_rating=ifelse(as.character(mpaa_rating) %in% c("","Not Rated"),"Not Rated",mpaa_rating))
+
+#Train/Test/Validate Split
+set.seed(123)
+model_data<-model_data[model_data$mpaa_rating!="Not Rated" & !is.na(model_data$total_gross),]
+total_rec<-1:nrow(model_data)
+train_ind<-sample(total_rec,size = as.integer(0.60*nrow(model_data)))
+total_rec<-setdiff(total_rec,train_ind)
+test_ind<-sample(total_rec,size = as.integer(0.20*nrow(model_data)))
+total_rec<-setdiff(total_rec,test_ind)
+val_ind<-total_rec
+
+#Data Split
+train_dat<-model_data[c(train_ind,test_ind,val_ind),]
+
+outliers<-boxplot.stats(log(train_dat$total_gross))$out
+train_dat<-train_dat[!log(train_dat$total_gross) %in% outliers,]
+
+x_mat<-model.matrix(total_gross~mpaa_rating+qtr_release,train_dat)
+x_mat<-x_mat[,2:7]
+x_mat<-as.matrix(cbind(train_dat[,!colnames(train_dat) %in% c("movie","byline","mpaa_rating","qtr_release","total_gross","sentiment_flag","Genre","theme")],x_mat))
+x_mat[is.na(x_mat)]<-0
+y_mat<-log(simplify(train_dat[,c("total_gross")]))
+set.seed(123)
+x_mat[,"max_days"]<-scale(x_mat[,"max_days"])
+x_mat[,"avg_no_theatres"]<-scale(x_mat[,"avg_no_theatres"])
+x_mat[,"Metascore"]<-scale(x_mat[,"Metascore"])
+x_mat[,"rotten_rating"]<-scale(x_mat[,"rotten_rating"])
+x_mat[,"imdbRating"]<-scale(x_mat[,"imdbRating"])
+
+lasso_model<-cv.glmnet(x_mat,y_mat,alpha=1,nfold=100,type.measure = "mse")
+coef_matrix<-data.matrix(coef(lasso_model, s=lasso_model$lambda.min))
+variables<-names(coef_matrix[coef_matrix!=0,])
+variables<-variables[!variables %like% "Intercept"]
+linear_model<-lm(y_mat~x_mat[,variables])
+#summary(linear_model)
+pred<-exp(predict(linear_model,data.frame(x_mat)))
+act<-exp(y_mat)
+fit_df<-data.frame(actual_revenue=act,fitted_revenue=pred)
+ggplot(fit_df)+
+  aes(x=log(fitted_revenue),y=log(actual_revenue))+
+  geom_point(color="dodgerblue4",size=0.8)+
+  geom_abline(linetype=2)+
+  ggtitle("Fitted vs Actual Box Office Revenue")+
+  xlab("Fitted Box Office Revenue")+
+  ylab("Actual Box Office Revenue")
+```
+
+From the above graph a,it is seen that identified influencer explain box-office revenue fairly well with an Adjusted  R-Square of 77%, indicating that these feature indeed are key to a movie's commercial success. The below graph shows the list of key features selection using LASSO and their extent of influence on box-office revenue and how significant is their influence. A darker shade of bar indicating a significant relationship. The scales of signficance are provided in the graph.
+
+```{r, echo=FALSE}
+coef_matrix<-data.frame(summary(linear_model)$coefficients)
+coef_matrix$var<-gsub("x_mat\\[\\, variables\\]","",rownames(coef_matrix))
+rownames(coef_matrix)<-NULL
+coef_matrix<-coef_matrix[!coef_matrix$var %like% "Intercept",]
+coef_matrix$var<-gsub("mpaa_rating","MPAA:",coef_matrix$var)
+coef_matrix$var<-gsub("avg_no_theatres","Number of theatres released in",coef_matrix$var)
+coef_matrix$var<-gsub("max_days","Number of running days",coef_matrix$var)
+coef_matrix$var<-gsub("no_star_cast","Number of Stars on Cast",coef_matrix$var)
+coef_matrix$var<-gsub("qtr_release","Released in:",coef_matrix$var)
+coef_matrix$var<-gsub("imdbRating","Rating:IMDB",coef_matrix$var)
+coef_matrix$var<-gsub("rotten_rating","Rating:Rotten Tomatoes",coef_matrix$var)
+coef_matrix$var<-gsub("lang_cnt","Number of languages released in",coef_matrix$var)
+coef_matrix$var<-gsub("average_sentiment_score","Movie Review Sentiment Score",coef_matrix$var)
+
+colnames(coef_matrix)<-c("Estimate","StdError","tvalue","pvalue","var")
+
+ggplot(coef_matrix[coef_matrix$pvalue<=0.05,])+
+  aes(x=reorder(var,-Estimate),y=Estimate,fill=pvalue)+
+  geom_col()+
+  coord_flip()+
+  labs(fill="Signifcance")+
+  ggtitle("Movie Attribute Impact on Box Office Revenue")+
+  ylab("Coefficient Estimate from Regression Model")+
+  xlab("Movie Attribute")+
+  theme(legend.position = "bottom")
+```
+
+####5.3.3. Inference:
+
+From all our study it is observed that the most influencing attributes of commercial success of a movie are the number of theatres it is released in, the number of days it has been running at theatres, the Genre:Action, Drama and Documentary of the movie, # of star actors in cast and MPAA rating: PG vs PG-13. With an Adjusted R-Square of 77%
+
+##Section 6: Conclusion and Discussion
+
+From all the analysis and experiments conducted it was observed that NYT crtic's aren't influenced by the box-office success of a movie and vice-versa. NYTimes critic's choice of a movie is rather strongly influenced by the sentiment of the movie review on NYTimes. While critic's, review and ratings don't seem to influence the commercial success of a movie, it is seen that the sheer number of theatres and running days for a movie drive the most part of box-office revenue followed by MPAA rating and Genre type (specifically being Action, Drama or Documentary). While Action movies make more revenue in box-office, Documentaries and Drama are less commercially successful. Likewise, PG-13 have more tickets sold than PG rated movie. The number of star actors on cast also strongly influence the box-office success of the movie. The more the star actor on cast, more the movie grosses at box-office.  
+
+While the regression model is able to explain well 77% of variance in the model, it should be noted that this analysis is limited to the scope of a few movies released during the year 2010-17 and is biased on the limited feature space that is being considered. Though the research proposed a method to analyse sentiment of review and extract polarity even on review content that was sparse, sometimes the reviewers write more about the plot of the movie and this approach fails to identify the true sentiment. More explorations can be conducted to handle sentiment identification in spare scenarios, one technique proposed is to explore additional review portals and average out the sentiment scores across different movie review portals. Another, limitation to the study is that, most box-office collections were of English movies, the developed approach wasn't analyzed on movies in other languages. Additional datasets from worldwide movie datasets could be researched and considered for further analysis.  
+
+Some more features that can be considered for further analysis are, if the movie was produced by a major distributor, if the director is a commercial-movie oriented director, if the movie was released on a holiday, instead of quarterly seasonality, if the movie is a sequel and leveraging facebook and twitter public data on actors to extract likes, fans and number of tweets/ posts and measure their popularity as a factor for a movie's box-office success.  
+
+##Section 7: References
+
+   [1. [NYT Movies Data description](http://developer.nytimes.com/movie_reviews_v2.json)   
+   2. [OMDB API Usage](http://www.omdbapi.com/)    
+   3. [Box-Office Numbers](https://www.the-numbers.com/)  
+   4. [NYT Movie Reviews](https://www.nytimes.com/reviews/movies)   
+   5. [Sentiment Analysis R package documentation](https://cran.r-project.org/web/packages/sentimentr/sentimentr.pdf)  
+   6. [The Elements of Statistical Learning, by Hastie, Tibshirani, and Friedman, Chapter 3, Section 3.4, The Lasso Method](https://web.stanford.edu/~hastie/Papers/ESLII.pdf)  
+   7. ["_The determinants of box office performance in the film industry revisited_"](https://pdfs.semanticscholar.org/c960/7aaa7746ec9735a19d0ab2e524e53d20ab7f.pdf), _by N.A. Pangarker and E.v.d.M. Smit University of Stellenbosch Business School_  
+   8. ["_Is movie a box office success? Analyzing search queries to predict commercial success_"](https://www.researchgate.net/publication/318085576_Is_Movie_a_Box_Office_success_Analyzing_search_queries_to_predict_commercial_success?enrichId=rgreq-325ed1e03df5436e1203b9c89e63d1b5-XXX&enrichSource=Y292ZXJQYWdlOzMxODA4NTU3NjtBUzo1MTE0Mjg0Njc4NTUzNjBAMTQ5ODk0NTQ1NjgzMw%3D%3D&el=1_x_2&_esc=publicationCoverPdf), _by Maharshi Vyas, Keval Shah, Nitin Upadhyay_    
+   9. [_A Comprehensive analysis and survey of theatrical and home entertainment market environment for 2017, by MPAA_](https://www.mpaa.org/wp-content/uploads/2018/04/MPAA-THEME-Report-2017_Final.pdf)]{style="float:left"}
+   
+   
+
+
