@@ -1,4 +1,4 @@
-# STA2453- Course Project 1
+# STA2453- Course Project I
 
 ## Movie Sucess Analysis: An Exploratory Study
 
