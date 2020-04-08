@@ -17,3 +17,5 @@ This project is focussed towards addressing the following research questions,
 * How well do NYTimes movie critic pick movies that are box office hits?
 * Is there a relationship between NYTimes movie review sentinment and critics pick?
 * What characteristics of a movie affects it’s revenue?
+
+This project was completely executed using R version 3.5 on R Studio version 1.1, the codes can be found on [/code](https://github.com/bharatlearnstocode/movie-data-exploration-data-science-exploration/tree/master/code) and all the pre-processed and raw data used can be found at, [/data](https://github.com/bharatlearnstocode/movie-data-exploration-data-science-exploration/tree/master/data)
